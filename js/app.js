@@ -447,8 +447,26 @@
     item.y = clamp(item.y, 0, WORLD_H - height);
   }
 
+  function isAdminCreatedItem(item) {
+    if (!item) return false;
+    return (
+      item.authorRole === "admin" ||
+      item.authorId === "admin" ||
+      item.type === "official"
+    );
+  }
+
+  function isOwnItem(item) {
+    return Boolean(
+      item && session?.accountId && item.authorId === session.accountId,
+    );
+  }
+
   function canEditItem(item) {
-    return session?.role === "admin" || item.authorId === session?.accountId;
+    if (!item || !session) return false;
+    if (session.role === "admin") return true;
+    if (isAdminCreatedItem(item)) return false;
+    return isOwnItem(item);
   }
 
   function isLockableImage(item) {
@@ -461,20 +479,44 @@
   }
 
   function canMoveItem(item) {
-    if (!session) return false;
-    if (item.type === "official" && session.role !== "admin") return false;
-    if (item.locked && session.role !== "admin") return false;
+    if (!item || !session) return false;
+    if (session.role === "admin") return true;
+    if (isAdminCreatedItem(item)) return false;
+    if (item.locked) return false;
+    // 참여자끼리는 작성자가 달라도 위치 이동만 허용한다.
     return true;
   }
 
   function canResizeItem(item) {
-    if (!canEditItem(item)) return false;
-    return !item.locked || session?.role === "admin";
+    if (!item || !session) return false;
+    if (session.role === "admin") return true;
+    if (isAdminCreatedItem(item) || item.locked) return false;
+    return isOwnItem(item);
   }
 
   function canDeleteItem(item) {
-    if (!item || item.locked) return false;
-    return session?.role === "admin" || item.authorId === session?.accountId;
+    if (!item || !session) return false;
+    // 이미지 잠금은 잠금을 해제하기 전에는 관리자도 삭제하지 못한다.
+    if (item.locked) return false;
+    if (session.role === "admin") return true;
+    if (isAdminCreatedItem(item)) return false;
+    return isOwnItem(item);
+  }
+
+  function itemPermissionMessage(item, action) {
+    if (!item) return "선택한 항목을 찾을 수 없습니다.";
+    if (session?.role === "admin") {
+      if (action === "delete" && item.locked)
+        return "잠긴 이미지는 잠금을 해제한 뒤 삭제할 수 있습니다.";
+      return "";
+    }
+    if (isAdminCreatedItem(item))
+      return "관리자가 등록한 항목은 참여자가 이동·수정·삭제할 수 없습니다.";
+    if (item.locked)
+      return "관리자가 잠근 이미지는 참여자가 이동·수정·삭제할 수 없습니다.";
+    if (!isOwnItem(item) && action !== "move")
+      return "다른 참여자가 만든 항목은 이동만 가능하며 수정·삭제할 수 없습니다.";
+    return "";
   }
 
   function canDeleteConnection(connection) {
@@ -712,10 +754,14 @@
   function renderSelectionPanel() {
     if (selectedIds.size > 1) {
       elements.selectionPanel.classList.remove("is-hidden");
-      const editableCount = [...selectedIds]
+      const deletableCount = [...selectedIds]
         .map((id) => state.items.find((item) => item.id === id))
         .filter((item) => item && canDeleteItem(item)).length;
-      elements.selectionPanel.innerHTML = `<p class="panel-kicker">MULTI SELECT</p><h3>${selectedIds.size}개 항목 선택됨</h3><p class="panel-description">다른 플레이어의 항목도 함께 이동할 수 있습니다. 삭제는 본인 작성 항목만 가능하며, 잠긴 이미지는 삭제되지 않습니다.</p>${editableCount ? `<div class="panel-actions"><button class="small-danger" data-action="delete-selected">삭제 가능한 항목 삭제</button></div>` : ""}`;
+      const multiDescription =
+        session?.role === "admin"
+          ? "관리자는 모든 항목을 이동·수정·삭제할 수 있습니다. 단, 잠긴 이미지는 잠금 해제 후 삭제할 수 있습니다."
+          : "다른 참여자의 항목은 위치만 이동할 수 있습니다. 수정·크기조절·삭제는 작성자 본인만 가능하고, 관리자 등록 항목은 이동도 할 수 없습니다.";
+      elements.selectionPanel.innerHTML = `<p class="panel-kicker">MULTI SELECT</p><h3>${selectedIds.size}개 항목 선택됨</h3><p class="panel-description">${multiDescription}</p>${deletableCount ? `<div class="panel-actions"><button class="small-danger" data-action="delete-selected">삭제 가능한 내 항목 삭제</button></div>` : ""}`;
       return;
     }
 
@@ -782,14 +828,17 @@
       item.type === "sticker" || item.type === "photoSticker"
         ? `<div class="panel-row"><label>${bodyLabel}</label><input id="editBody" value="${esc(item.body || "")}" maxlength="60" ${editable ? "" : "disabled"}></div>`
         : `<div class="panel-row"><label>${bodyLabel}</label><textarea id="editBody" ${editable ? "" : "disabled"}>${esc(item.body || "")}</textarea></div>`;
+    const resizable = canResizeItem(item);
     const resizeHelp = ["evidence", "official", "photoSticker"].includes(
       item.type,
     )
-      ? `<div class="panel-tip">${item.locked && session?.role !== "admin" ? "관리자가 고정한 이미지입니다. 플레이어는 위치 이동과 크기 조절을 할 수 없습니다." : "선택한 카드의 오른쪽 아래 핸들을 드래그하면 사진 비율을 유지한 채 크기를 조절할 수 있습니다."}</div>`
+      ? `<div class="panel-tip">${resizable ? "선택한 카드의 오른쪽 아래 핸들을 드래그하면 사진 비율을 유지한 채 크기를 조절할 수 있습니다." : isAdminCreatedItem(item) && session?.role !== "admin" ? "관리자가 등록한 항목은 크기를 조절할 수 없습니다." : !isOwnItem(item) && session?.role !== "admin" ? "다른 참여자의 항목은 위치 이동만 가능하며 크기를 조절할 수 없습니다." : "현재 이 이미지는 크기를 조절할 수 없습니다."}</div>`
       : "";
     const moveHelp = !movable
-      ? `<div class="panel-tip panel-tip--locked">🔒 현재 위치가 고정되어 있습니다.</div>`
-      : "";
+      ? `<div class="panel-tip panel-tip--locked">🔒 ${isAdminCreatedItem(item) && session?.role !== "admin" ? "관리자가 등록한 항목이라 위치를 옮길 수 없습니다." : "현재 위치가 고정되어 있습니다."}</div>`
+      : !isOwnItem(item) && session?.role !== "admin"
+        ? `<div class="panel-tip">다른 참여자의 항목입니다. 위치 이동만 가능합니다.</div>`
+        : "";
     const lockAction =
       session?.role === "admin" && lockable
         ? `<button class="small-lock" data-action="toggle-lock">${item.locked ? "잠금 해제" : "이미지 잠금"}</button>`
@@ -1090,6 +1139,7 @@
       ...attachment,
       authorId: session.accountId,
       authorName: session.name,
+      authorRole: session.role,
       createdAt: nowIso(),
       updatedAt: nowIso(),
     };
@@ -1120,6 +1170,7 @@
       color: String(fd.get("color") || NOTE_COLORS[0]),
       authorId: session.accountId,
       authorName: session.name,
+      authorRole: session.role,
       createdAt: nowIso(),
       updatedAt: nowIso(),
     };
@@ -1148,6 +1199,7 @@
       body: String(fd.get("body") || "").trim(),
       authorId: session.accountId,
       authorName: session.name,
+      authorRole: session.role,
       createdAt: nowIso(),
       updatedAt: nowIso(),
     };
@@ -1198,6 +1250,7 @@
       ...attachment,
       authorId: session.accountId,
       authorName: session.name,
+      authorRole: session.role,
       createdAt: nowIso(),
       updatedAt: nowIso(),
     };
@@ -1233,10 +1286,17 @@
         ? [selected.id]
         : [];
     if (!ids.length) return;
-    const deletableItems = ids
+    const selectedItems = ids
       .map((id) => state.items.find((item) => item.id === id))
-      .filter((item) => item && canDeleteItem(item));
-    if (!deletableItems.length) return;
+      .filter(Boolean);
+    const deletableItems = selectedItems.filter((item) => canDeleteItem(item));
+    if (!deletableItems.length) {
+      const message = selectedItems
+        .map((item) => itemPermissionMessage(item, "delete"))
+        .find(Boolean);
+      if (message) showToast(message);
+      return;
+    }
 
     snapshot();
     const deleteIds = new Set(deletableItems.map((item) => item.id));
@@ -1299,6 +1359,7 @@
       label: "",
       authorId: session.accountId,
       authorName: session.name,
+      authorRole: session.role,
       createdAt: nowIso(),
       updatedAt: nowIso(),
       color: "red",
@@ -1526,7 +1587,11 @@
   }
 
   function beginItemDrag(event, itemElement, item) {
-    if (!canMoveItem(item)) return;
+    if (!canMoveItem(item)) {
+      const message = itemPermissionMessage(item, "move");
+      if (message) showToast(message);
+      return;
+    }
     const ids = selectedIds.has(item.id) ? [...selectedIds] : [item.id];
     if (!selectedIds.has(item.id)) setSingleItemSelection(item.id);
     const movableItems = ids
