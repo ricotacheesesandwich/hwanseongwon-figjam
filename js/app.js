@@ -489,6 +489,9 @@
 
   function canResizeItem(item) {
     if (!item || !session) return false;
+    // 포스트잇 크기/비율 조절은 작성자 본인만 가능하다.
+    // 관리자가 다른 참여자의 포스트잇을 선택해도 크기는 바꿀 수 없다.
+    if (item.type === "note") return isOwnItem(item);
     if (session.role === "admin") return true;
     if (isAdminCreatedItem(item) || item.locked) return false;
     return isOwnItem(item);
@@ -558,22 +561,28 @@
   }
 
   function itemStyle(item) {
-    const autoHeight = ["evidence", "official", "photoSticker"].includes(
-      item.type,
-    );
+    const noteAutoHeight = item.type === "note";
+    const autoHeight =
+      noteAutoHeight ||
+      ["evidence", "official", "photoSticker"].includes(item.type);
     const rotation = ["evidence", "official"].includes(item.type)
       ? 0
       : item.rotation || 0;
-    return [
+    const styleParts = [
       `left:${item.x}px`,
       `top:${item.y}px`,
       `width:${item.w || 220}px`,
       autoHeight
         ? "height:auto"
         : `height:${item.h || estimatedItemHeight(item)}px`,
-      `z-index:${item.z || 1}`,
+      `z-index:${item.type === "sticker" ? 100000 + Number(item.z || 1) : Number(item.z || 1)}`,
       `transform:rotate(${rotation}deg)`,
-    ].join(";");
+    ];
+    // 포스트잇은 내용이 길어지면 자동으로 아래로 늘어나되,
+    // 작성자가 직접 늘린 세로 길이는 최소 높이로 유지한다.
+    if (noteAutoHeight)
+      styleParts.push(`min-height:${Math.max(120, Number(item.h || 190))}px`);
+    return styleParts.join(";");
   }
 
   function renderBoard() {
@@ -613,7 +622,11 @@
     const resizeHandle =
       canResizeItem(item) &&
       ["evidence", "official", "photoSticker"].includes(item.type)
-        ? `<button class="resize-handle" type="button" data-resize-item="${esc(item.id)}" aria-label="크기 조절" title="사진 비율을 유지하며 크기 조절"></button>`
+        ? `<button class="resize-handle" type="button" data-resize-item="${esc(item.id)}" data-resize-axis="x" aria-label="크기 조절" title="사진 비율을 유지하며 크기 조절"></button>`
+        : "";
+    const noteResizeHandles =
+      item.type === "note" && canResizeItem(item)
+        ? `<button class="note-resize-handle note-resize-handle--x" type="button" data-resize-item="${esc(item.id)}" data-resize-axis="x" aria-label="포스트잇 가로 길이 조절" title="가로 길이 조절"></button><button class="note-resize-handle note-resize-handle--y" type="button" data-resize-item="${esc(item.id)}" data-resize-axis="y" aria-label="포스트잇 세로 길이 조절" title="세로 길이 조절"></button><button class="note-resize-handle note-resize-handle--xy" type="button" data-resize-item="${esc(item.id)}" data-resize-axis="xy" aria-label="포스트잇 가로·세로 길이 조절" title="가로·세로 길이 조절"></button>`
         : "";
     const lockBadge =
       item.locked && isLockableImage(item)
@@ -621,7 +634,7 @@
         : "";
 
     if (item.type === "note") {
-      return `<article class="board-item${selectedClass}${connectClass}${lockedClass}${immovableClass}" data-item-id="${esc(item.id)}" style="${style}"><div class="item-card note-card" style="--note-color:${esc(item.color || NOTE_COLORS[0])}"><p class="note-text">${esc(item.body)}</p><div class="note-author">${esc(item.authorName)}</div></div></article>`;
+      return `<article class="board-item board-item--note${selectedClass}${connectClass}${lockedClass}${immovableClass}" data-item-id="${esc(item.id)}" style="${style}"><div class="item-card note-card" style="--note-color:${esc(item.color || NOTE_COLORS[0])}"><p class="note-text">${esc(item.body)}</p><div class="note-author">${esc(item.authorName)}</div></div>${noteResizeHandles}</article>`;
     }
 
     if (item.type === "sticker") {
@@ -829,11 +842,12 @@
         ? `<div class="panel-row"><label>${bodyLabel}</label><input id="editBody" value="${esc(item.body || "")}" maxlength="60" ${editable ? "" : "disabled"}></div>`
         : `<div class="panel-row"><label>${bodyLabel}</label><textarea id="editBody" ${editable ? "" : "disabled"}>${esc(item.body || "")}</textarea></div>`;
     const resizable = canResizeItem(item);
-    const resizeHelp = ["evidence", "official", "photoSticker"].includes(
-      item.type,
-    )
-      ? `<div class="panel-tip">${resizable ? "선택한 카드의 오른쪽 아래 핸들을 드래그하면 사진 비율을 유지한 채 크기를 조절할 수 있습니다." : isAdminCreatedItem(item) && session?.role !== "admin" ? "관리자가 등록한 항목은 크기를 조절할 수 없습니다." : !isOwnItem(item) && session?.role !== "admin" ? "다른 참여자의 항목은 위치 이동만 가능하며 크기를 조절할 수 없습니다." : "현재 이 이미지는 크기를 조절할 수 없습니다."}</div>`
-      : "";
+    const resizeHelp =
+      item.type === "note"
+        ? `<div class="panel-tip">${resizable ? "포스트잇은 글 길이에 맞춰 자동으로 늘어납니다. 작성자는 선택 후 오른쪽 핸들로 가로, 아래 핸들로 세로, 모서리 핸들로 가로·세로를 함께 조절할 수 있습니다." : "포스트잇의 길이 조절은 작성자 본인만 할 수 있습니다."}</div>`
+        : ["evidence", "official", "photoSticker"].includes(item.type)
+          ? `<div class="panel-tip">${resizable ? "선택한 카드의 오른쪽 아래 핸들을 드래그하면 사진 비율을 유지한 채 크기를 조절할 수 있습니다." : isAdminCreatedItem(item) && session?.role !== "admin" ? "관리자가 등록한 항목은 크기를 조절할 수 없습니다." : !isOwnItem(item) && session?.role !== "admin" ? "다른 참여자의 항목은 위치 이동만 가능하며 크기를 조절할 수 없습니다." : "현재 이 이미지는 크기를 조절할 수 없습니다."}</div>`
+          : "";
     const moveHelp = !movable
       ? `<div class="panel-tip panel-tip--locked">🔒 ${isAdminCreatedItem(item) && session?.role !== "admin" ? "관리자가 등록한 항목이라 위치를 옮길 수 없습니다." : "현재 위치가 고정되어 있습니다."}</div>`
       : !isOwnItem(item) && session?.role !== "admin"
@@ -1677,7 +1691,7 @@
     renderSelectionPanel();
   }
 
-  function beginResize(event, itemElement, item) {
+  function beginResize(event, itemElement, item, axis = "x") {
     if (!canResizeItem(item)) return;
     event.preventDefault();
     event.stopPropagation();
@@ -1686,8 +1700,11 @@
     resizing = {
       pointerId: event.pointerId,
       id: item.id,
+      axis,
       startWorld: point,
       startWidth: item.w || itemElement.offsetWidth || 320,
+      startHeight:
+        itemElement.offsetHeight || item.h || estimatedItemHeight(item),
       moved: false,
     };
     itemElement.classList.add("is-resizing");
@@ -1700,13 +1717,37 @@
     if (!item) return;
     const point = worldPoint(event.clientX, event.clientY);
     const dx = point.x - resizing.startWorld.x;
+    const dy = point.y - resizing.startWorld.y;
+    const dom = elements.items.querySelector(
+      `[data-item-id="${CSS.escape(item.id)}"]`,
+    );
+
+    if (item.type === "note") {
+      if (resizing.axis === "x" || resizing.axis === "xy") {
+        const nextWidth = clamp(resizing.startWidth + dx, 160, 1000);
+        resizing.moved =
+          resizing.moved || Math.abs(nextWidth - resizing.startWidth) > 0.5;
+        item.w = nextWidth;
+        if (dom) dom.style.width = `${nextWidth}px`;
+      }
+      if (resizing.axis === "y" || resizing.axis === "xy") {
+        const nextHeight = clamp(resizing.startHeight + dy, 120, 1400);
+        resizing.moved =
+          resizing.moved || Math.abs(nextHeight - resizing.startHeight) > 0.5;
+        item.h = nextHeight;
+        if (dom) {
+          dom.style.height = "auto";
+          dom.style.minHeight = `${nextHeight}px`;
+        }
+      }
+      scheduleDragPaint(renderConnections);
+      return;
+    }
+
     const nextWidth = clamp(resizing.startWidth + dx, 180, 1100);
     resizing.moved =
       resizing.moved || Math.abs(nextWidth - resizing.startWidth) > 0.5;
     item.w = nextWidth;
-    const dom = elements.items.querySelector(
-      `[data-item-id="${CSS.escape(item.id)}"]`,
-    );
     if (dom) dom.style.width = `${nextWidth}px`;
     scheduleDragPaint(renderConnections);
   }
@@ -1845,7 +1886,13 @@
       const item = state.items.find(
         (entry) => entry.id === resizeHandle.dataset.resizeItem,
       );
-      if (item) beginResize(event, itemElement, item);
+      if (item)
+        beginResize(
+          event,
+          itemElement,
+          item,
+          resizeHandle.dataset.resizeAxis || "x",
+        );
       return;
     }
 

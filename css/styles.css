@@ -1296,3 +1296,68 @@ button {
 .is-hidden {
   display: none;
 }
+
+/* ==================================================
+   포스트잇 자동 높이 + 작성자 전용 자유 크기 조절
+   ================================================== */
+.board-item--note {
+  height: auto;
+  will-change: left, top, width, min-height, transform;
+}
+
+.board-item--note .note-card {
+  width: 100%;
+  height: auto;
+  min-height: inherit;
+  box-sizing: border-box;
+  overflow: visible;
+}
+
+.board-item--note .note-text {
+  min-height: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.note-resize-handle {
+  position: absolute;
+  z-index: 9;
+  padding: 0;
+  border: 2px solid #fff;
+  border-radius: 5px;
+  background: var(--selection);
+  box-shadow: 0 2px 7px rgba(0, 0, 0, 0.22);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.board-item--note.is-selected .note-resize-handle {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.note-resize-handle--x {
+  top: 50%;
+  right: -8px;
+  width: 13px;
+  height: 34px;
+  transform: translateY(-50%);
+  cursor: ew-resize;
+}
+
+.note-resize-handle--y {
+  bottom: -8px;
+  left: 50%;
+  width: 34px;
+  height: 13px;
+  transform: translateX(-50%);
+  cursor: ns-resize;
+}
+
+.note-resize-handle--xy {
+  right: -9px;
+  bottom: -9px;
+  width: 18px;
+  height: 18px;
+  cursor: nwse-resize;
+}
